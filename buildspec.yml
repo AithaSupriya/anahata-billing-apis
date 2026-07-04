@@ -1,0 +1,27 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Using Node version:"
+      - node -v
+      - npm -v
+  pre_build:
+    commands:
+      - echo "Configuring CodeArtifact authentication..."
+      - export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain anahata --domain-owner 689327566109 --region us-east-2 --query authorizationToken --output text)
+      - echo "Creating .npmrc with authentication..."
+      - printf "registry=https://registry.npmjs.org/\n" > .npmrc
+      - printf "@anahata:registry=https://anahata-689327566109.d.codeartifact.us-east-2.amazonaws.com/npm/anahata-artifacts/\n" >> .npmrc
+      - printf "//anahata-689327566109.d.codeartifact.us-east-2.amazonaws.com/npm/anahata-artifacts/:_authToken=%s\n" "$CODEARTIFACT_AUTH_TOKEN" >> .npmrc
+      - printf "//anahata-689327566109.d.codeartifact.us-east-2.amazonaws.com/npm/anahata-artifacts/:always-auth=true\n" >> .npmrc
+      - echo "Generated .npmrc (token redacted):"
+      - cat .npmrc | sed "s/:_authToken=.*/:_authToken=***REDACTED***/g"
+      - echo "Installing dependencies..."
+      - npm install
+  build:
+    commands:
+      - npm run build
+      - npx cdk synth

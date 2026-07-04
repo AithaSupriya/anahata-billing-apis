@@ -1,0 +1,14 @@
+{
+  "app": "node dist/cdk/App.js",
+  "watch": {
+    "include": ["src/**"],
+    "exclude": ["node_modules", "dist", "cdk.out"]
+  },
+  "context": {
+    "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
+    "@aws-cdk/core:stackRelativeExports": true,
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:enablePartitionLiterals": true,
+    "@aws-cdk-lib/aws-apigateway:requestValidatorUniqueId": true
+  }
+}

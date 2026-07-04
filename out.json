@@ -1,0 +1,1 @@
+{"policyDocument":{"Version":"2012-10-17","Statement":[{"Action":"execute-api:Invoke","Effect":"Deny","Resource":"arn:aws:execute-api:us-east-2:689327566109:gx8hh1qzvb/sandbox/GET/apiv1/orgs/list"}]},"context":{"orgId":"","isAdmin":"false"}}

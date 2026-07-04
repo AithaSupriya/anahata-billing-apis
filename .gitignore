@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+cdk.out/
+
+# Generated code (copied from anahata-billing-model during build)
+src/generated/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# npm
+package-lock.json
+*.tgz
+
+# CDK
+cdk.context.json

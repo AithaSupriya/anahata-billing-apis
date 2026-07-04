@@ -1,0 +1,44 @@
+{
+  "name": "@anahata/billing-apis",
+  "version": "1.0.0",
+  "description": "Billing Platform Service APIs — CDK App",
+  "license": "ISC",
+  "author": "anahata.ai",
+  "type": "module",
+  "main": "dist/cdk/App.js",
+  "scripts": {
+    "login": "(cd ../anahata-cdk-commons && npm run login);",
+    "login:win": "cd ../anahata-cdk-commons && npm run login:win",
+    "build": "npm run copy-generated && tsc && node esbuild.config.js && npm run postbuild:copy",
+    "postbuild:copy": "node -e \"const fs=require('fs');fs.copyFileSync('libs/package.json','dist/lambda/package.json');fs.copyFileSync('libs/package.json','dist/generated/lambda/package.json');console.log('Copied package.json to Lambda dirs')\"",
+    "copy-generated": "node scripts/copy-generated.js",
+    "clean": "rimraf dist/ cdk.out/",
+    "synth": "npx cdk synth",
+    "deploy": "npm run build && npx cdk deploy --all",
+    "deploy:sandbox": "npm run build && npx cdk deploy --context stage=sandbox --all",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "@anahata/cdk-commons": "file:../anahata-cdk-commons",
+    "@anahata/billing-model": "file:../anahata-billing-model",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1053.0",
+    "@aws-sdk/client-dynamodb": "^3.470.0",
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@aws-sdk/client-ses": "^3.1013.0",
+    "@aws-sdk/lib-dynamodb": "^3.470.0",
+    "aws-cdk-lib": "^2.175.0",
+    "aws-jwt-verify": "^4.0.1",
+    "constructs": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "constructs": "$constructs",
+    "aws-cdk-lib": "$aws-cdk-lib"
+  }
+}

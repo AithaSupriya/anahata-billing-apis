@@ -1,0 +1,1 @@
+{"type":"REQUEST","httpMethod":"GET","resource":"/apiv1/orgs/list","path":"/apiv1/orgs/list","headers":{"Authorization":"Bearer test-token"},"requestContext":{"resourcePath":"/apiv1/orgs/list","httpMethod":"GET"},"methodArn":"arn:aws:execute-api:us-east-2:689327566109:gx8hh1qzvb/sandbox/GET/apiv1/orgs/list"}
