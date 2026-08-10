@@ -21,6 +21,11 @@ import { DynamoDBDocumentClient, GetCommand, BatchGetCommand } from '@aws-sdk/li
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
 
+// Note: The authorizer uses API Gateway's native policy document format,
+// not the standard API response helpers (which return APIGatewayProxyResult).
+// Error codes are used in logs for consistency.
+import { ErrorCodes } from './common/error-codes.js';
+
 // ── Environment Variables ──
 const USER_POOL_ID = process.env.USER_POOL_ID || '';
 const CLIENT_IDS = (process.env.CLIENT_IDS || '').split(',').filter(Boolean);
@@ -49,13 +54,9 @@ interface AuthContext {
 // ── Open Operations ──
 // These don't require org membership — any authenticated user can access them.
 function isOpenOperation(path: string, httpMethod: string): boolean {
-  // Create organization
   if (path === '/apiv1/orgs' && httpMethod === 'POST') return true;
-  // List user's organizations
   if (path === '/apiv1/orgs/list' && httpMethod === 'GET') return true;
-  // Get specific org (read-only)
   if (/^\/apiv1\/orgs\/[^/]+$/.test(path) && httpMethod === 'GET') return true;
-  // Public endpoints
   if (path.includes('/public/')) return true;
   return false;
 }
@@ -88,7 +89,6 @@ function extractAction(event: APIGatewayRequestAuthorizerEvent): string {
   const method = event.httpMethod || '';
   const path = event.resource || event.requestContext?.resourcePath || '';
 
-  // Extract resource name from path (last non-parameter segment)
   const segments = path.split('/').filter(Boolean);
   let resource = 'unknown';
   for (let i = segments.length - 1; i >= 0; i--) {
@@ -108,7 +108,6 @@ function extractAction(event: APIGatewayRequestAuthorizerEvent): string {
 }
 
 // ── Validate Org Membership ──
-// BillingUsers key: PK = orgId, SK = userId
 async function validateOrgMembership(orgId: string, userId: string): Promise<{ found: boolean; roleIds: string[] }> {
   try {
     const result = await ddb.send(new GetCommand({
@@ -121,13 +120,12 @@ async function validateOrgMembership(orgId: string, userId: string): Promise<{ f
       roleIds: result.Item.accessRoles || result.Item.roles || [],
     };
   } catch (error) {
-    console.error('[BillingAuthz] Error checking membership:', error);
+    console.error(`[BillingAuthz] ${ErrorCodes.DATABASE_ERROR} checking membership:`, error);
     return { found: false, roleIds: [] };
   }
 }
 
 // ── Resolve User Policies ──
-// BillingAccessRoles key: PK = orgId, SK = accessRoleId
 async function resolveUserActions(orgId: string, roleIds: string[]): Promise<string[]> {
   if (roleIds.length === 0) return [];
 
@@ -148,7 +146,7 @@ async function resolveUserActions(orgId: string, roleIds: string[]): Promise<str
 
     return [...new Set(allActions)];
   } catch (error) {
-    console.error('[BillingAuthz] Error resolving policies:', error);
+    console.error(`[BillingAuthz] ${ErrorCodes.DATABASE_ERROR} resolving policies:`, error);
     return [];
   }
 }
@@ -189,7 +187,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     if (authToken?.startsWith('Bearer ')) authToken = authToken.substring(7);
 
     if (!authToken) {
-      console.log('[BillingAuthz] No token → Deny');
+      console.log(`[BillingAuthz] ${ErrorCodes.MISSING_TOKEN} → Deny`);
       return generatePolicy('unknown', 'Deny', event.methodArn, { userId: '', orgId: '', isAdmin: 'false' });
     }
 
@@ -200,7 +198,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
       userId = payload.sub;
       username = (payload['cognito:username'] as string) || payload.sub;
     } catch (err) {
-      console.error('[BillingAuthz] Token verification failed:', err);
+      console.error(`[BillingAuthz] ${ErrorCodes.INVALID_TOKEN}:`, err);
       return generatePolicy('unknown', 'Deny', event.methodArn, { userId: '', orgId: '', isAdmin: 'false' });
     }
 
@@ -218,13 +216,13 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
 
     // 5. Org-scoped — validate membership in BillingUsers
     if (!orgId) {
-      console.log('[BillingAuthz] No orgId in request → Deny');
+      console.log(`[BillingAuthz] ${ErrorCodes.ORG_ACCESS_DENIED} No orgId → Deny`);
       return generatePolicy(userId, 'Deny', event.methodArn, { userId, orgId: '', isAdmin: 'false' });
     }
 
     const membership = await validateOrgMembership(orgId, userId);
     if (!membership.found) {
-      console.log(`[BillingAuthz] User ${userId} not found in ${USERS_TABLE} for org ${orgId} → Deny`);
+      console.log(`[BillingAuthz] ${ErrorCodes.ORG_ACCESS_DENIED} User ${userId} not in org ${orgId} → Deny`);
       return generatePolicy(userId, 'Deny', event.methodArn, { userId, orgId, isAdmin: 'false' });
     }
 
@@ -234,7 +232,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     const allowed = checkPermission(userActions, requiredAction);
 
     if (!allowed) {
-      console.log(`[BillingAuthz] Action ${requiredAction} denied for user ${userId}. Has: [${userActions.join(', ')}]`);
+      console.log(`[BillingAuthz] ${ErrorCodes.INSUFFICIENT_PERMISSIONS} Action ${requiredAction} denied for ${userId}. Has: [${userActions.join(', ')}]`);
       return generatePolicy(userId, 'Deny', event.methodArn, { userId, orgId, isAdmin: 'false' });
     }
 
@@ -242,7 +240,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     return generatePolicy(userId, 'Allow', event.methodArn, { userId, orgId, isAdmin: 'false' });
 
   } catch (error) {
-    console.error('[BillingAuthz] Unhandled error:', error);
+    console.error(`[BillingAuthz] ${ErrorCodes.INTERNAL_ERROR}:`, error);
     return generatePolicy('error', 'Deny', event.methodArn, { userId: '', orgId: '', isAdmin: 'false' });
   }
 };

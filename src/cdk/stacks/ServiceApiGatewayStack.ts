@@ -133,6 +133,24 @@ export class ServiceApiGatewayStack extends AnahataCommonStack {
     new GatewayResponse(this, 'Default4xx', { restApi: this.restApi as any, type: ResponseType.DEFAULT_4XX, responseHeaders: corsHeaders });
     new GatewayResponse(this, 'Default5xx', { restApi: this.restApi as any, type: ResponseType.DEFAULT_5XX, responseHeaders: corsHeaders });
 
+    // ── Rate Limit (429) Response with Retry-After header ──
+    new GatewayResponse(this, 'ThrottleResponse', {
+      restApi: this.restApi as any,
+      type: ResponseType.THROTTLED,
+      responseHeaders: {
+        ...corsHeaders,
+        'Retry-After': "'5'",
+      },
+      templates: {
+        'application/json': JSON.stringify({
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Too many requests. Please retry after the specified time.',
+          },
+        }),
+      },
+    });
+
     // Custom domain
     if (props.domainName && props.certificateArn) {
       const cert = Certificate.fromCertificateArn(this, 'Cert', props.certificateArn);

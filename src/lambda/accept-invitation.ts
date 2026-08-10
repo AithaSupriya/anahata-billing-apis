@@ -9,15 +9,6 @@
  *  3. Create Cognito user with provided email/password
  *  4. Create User record in BillingUsers with assigned access roles
  *  5. Update invitation status to ACCEPTED
- *
- * Request body:
- * {
- *   "invitationCode": "uuid",
- *   "email": "user@example.com",
- *   "password": "SecureP@ss1",
- *   "firstName": "John",
- *   "lastName": "Doe"
- * }
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
@@ -34,6 +25,18 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { randomUUID } from 'crypto';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+
+import { ErrorCodes } from './common/error-codes.js';
+import {
+  successResponse,
+  errorResponse,
+  badRequest,
+  notFound,
+  conflict,
+  methodNotAllowed,
+  corsResponse,
+  internalError,
+} from './common/api-response.js';
 
 // ── Environment Variables ──
 const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID || '';
@@ -52,24 +55,10 @@ enum InvitationStatus {
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const cognito = new CognitoIdentityProviderClient({});
 
-// ── CORS Headers ──
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-function apiResponse(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return { statusCode, headers: CORS_HEADERS, body: JSON.stringify(body) };
-}
-
 /**
  * Validates the invitation and returns the invitation record if valid.
  */
 async function validateInvitation(invitationCode: string, orgId: string) {
-  // The invitation table has composite key: PK=orgId, SK=invitationId
-  // The "code" in the email link IS the invitationId
   const result = await ddb.send(
     new GetCommand({
       TableName: INVITATIONS_TABLE_NAME,
@@ -79,13 +68,14 @@ async function validateInvitation(invitationCode: string, orgId: string) {
 
   const invitation = result.Item;
   if (!invitation) {
-    return { valid: false, error: 'Invitation not found', statusCode: 404 };
+    return { valid: false, error: 'Invitation not found', code: ErrorCodes.INVITATION_NOT_FOUND, statusCode: 404 };
   }
 
   if (invitation.status !== InvitationStatus.PENDING) {
     return {
       valid: false,
       error: `Invitation is ${invitation.status.toLowerCase()}`,
+      code: ErrorCodes.INVITATION_NOT_PENDING,
       statusCode: 409,
     };
   }
@@ -94,7 +84,6 @@ async function validateInvitation(invitationCode: string, orgId: string) {
   if (invitation.expiresAt) {
     const expiryDate = new Date(invitation.expiresAt);
     if (expiryDate < new Date()) {
-      // Mark as expired
       await ddb.send(
         new UpdateCommand({
           TableName: INVITATIONS_TABLE_NAME,
@@ -107,7 +96,7 @@ async function validateInvitation(invitationCode: string, orgId: string) {
           },
         }),
       );
-      return { valid: false, error: 'Invitation has expired', statusCode: 409 };
+      return { valid: false, error: 'Invitation has expired', code: ErrorCodes.INVITATION_EXPIRED, statusCode: 409 };
     }
   }
 
@@ -167,51 +156,49 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   console.log('EVENT:', JSON.stringify({ ...event, body: '[REDACTED]' }));
 
   try {
-    if (event.httpMethod === 'OPTIONS') return apiResponse(200, {});
+    if (event.httpMethod === 'OPTIONS') return corsResponse();
 
     if (event.httpMethod !== 'POST') {
-      return apiResponse(405, { error: 'Method not allowed' });
+      return methodNotAllowed();
     }
 
     let body: any;
     try {
       body = JSON.parse(event.body || '{}');
     } catch {
-      return apiResponse(400, { error: 'Invalid JSON in request body' });
+      return badRequest(ErrorCodes.INVALID_JSON, 'Invalid JSON in request body');
     }
 
     // Validate required fields
     const { invitationCode, email, password, firstName, lastName, orgId } = body;
 
-    if (!invitationCode) return apiResponse(400, { error: 'invitationCode is required' });
-    if (!email) return apiResponse(400, { error: 'email is required' });
-    if (!password) return apiResponse(400, { error: 'password is required' });
-    if (!firstName) return apiResponse(400, { error: 'firstName is required' });
-    if (!lastName) return apiResponse(400, { error: 'lastName is required' });
-    if (!orgId) return apiResponse(400, { error: 'orgId is required' });
+    if (!invitationCode) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'invitationCode is required', 'invitationCode');
+    if (!email) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'email is required', 'email');
+    if (!password) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'password is required', 'password');
+    if (!firstName) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'firstName is required', 'firstName');
+    if (!lastName) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'lastName is required', 'lastName');
+    if (!orgId) return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'orgId is required', 'orgId');
 
     // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return apiResponse(400, { error: 'Invalid email format' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return badRequest(ErrorCodes.INVALID_EMAIL, 'Invalid email format', 'email');
     }
 
-    // Validate password strength (min 8 chars, uppercase, lowercase, number, special)
+    // Validate password strength
     if (password.length < 8) {
-      return apiResponse(400, { error: 'Password must be at least 8 characters' });
+      return badRequest(ErrorCodes.VALIDATION_ERROR, 'Password must be at least 8 characters', 'password');
     }
 
     // Step 1: Validate invitation
     const validationResult = await validateInvitation(invitationCode, orgId);
     if (!validationResult.valid) {
-      return apiResponse(validationResult.statusCode!, { error: validationResult.error });
+      return errorResponse(validationResult.statusCode!, validationResult.code!, validationResult.error!);
     }
 
     const invitation = validationResult.invitation!;
     const invRoleId = invitation.roleId;
     const accessRoles = invRoleId ? [invRoleId] : (invitation.accessRoles || []);
     const groups = invitation.groups || [];
-    // orgId comes from body (verified against the invitation's orgId)
     const invOrgId = invitation.orgId || orgId;
 
     // Step 2: Create Cognito user
@@ -221,9 +208,9 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     } catch (err: any) {
       console.error('[ACCEPT_INVITATION] Cognito error:', err);
       if (err.name === 'UsernameExistsException') {
-        return apiResponse(409, { error: 'A user with this email already exists' });
+        return conflict(ErrorCodes.USER_ALREADY_EXISTS, 'A user with this email already exists');
       }
-      return apiResponse(500, { error: 'Failed to create user account' });
+      return errorResponse(500, ErrorCodes.COGNITO_ERROR, 'Failed to create user account');
     }
 
     const now = new Date().toISOString();
@@ -250,7 +237,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     } catch (err: any) {
       if (err.name === 'ConditionalCheckFailedException') {
-        return apiResponse(409, { error: 'User already exists in this organization' });
+        return conflict(ErrorCodes.USER_ALREADY_EXISTS, 'User already exists in this organization');
       }
       throw err;
     }
@@ -272,7 +259,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     console.log(`[ACCEPT_INVITATION] invitationId=${invitationCode} userId=${userId} orgId=${orgId}`);
 
-    return apiResponse(200, {
+    return successResponse(200, {
       message: 'Invitation accepted successfully',
       userId,
       orgId,
@@ -280,6 +267,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
   } catch (error: any) {
     console.error('[ACCEPT_INVITATION] Handler error:', error);
-    return apiResponse(500, { error: 'Internal server error' });
+    return internalError(event.requestContext?.requestId);
   }
 };

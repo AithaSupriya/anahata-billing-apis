@@ -1,0 +1,727 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Anahata Billing API",
+    "description": "Multi-tenant billing platform API for managing organizations, products, pricing plans, customers, subscriptions, and team members.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Anahata Engineering",
+      "email": "info@anahata.ai"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://billing-api.sandbox.anahata.ai",
+      "description": "Sandbox"
+    },
+    {
+      "url": "https://billing-api.anahata.ai",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    { "BearerAuth": [] }
+  ],
+  "tags": [
+    { "name": "Organizations", "description": "Manage billing organizations" },
+    { "name": "Products", "description": "Manage product catalog" },
+    { "name": "Plans", "description": "Manage pricing plans" },
+    { "name": "Customers", "description": "Manage customers" },
+    { "name": "Subscriptions", "description": "Subscription lifecycle management" },
+    { "name": "Invitations", "description": "Team invitation management" },
+    { "name": "API Keys", "description": "Manage API keys for public access" },
+    { "name": "Public", "description": "Unauthenticated public website endpoints" }
+  ],
+  "paths": {
+    "/apiv1/orgs": {
+      "post": {
+        "tags": ["Organizations"],
+        "summary": "Create organization",
+        "description": "Creates an organization with default roles (Owner, Admin, Manager, Employee), a Cognito user, and the first team member record.",
+        "operationId": "createOrganization",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateOrganizationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Organization created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateOrganizationResponse" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/orgs/list": {
+      "get": {
+        "tags": ["Organizations"],
+        "summary": "List user's organizations",
+        "description": "Returns all organizations the authenticated user belongs to.",
+        "operationId": "listOrganizations",
+        "responses": {
+          "200": {
+            "description": "List of organizations",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListOrganizationsResponse" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/{orgId}/products": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "List products",
+        "operationId": "listProducts",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of products",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedProducts" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Products"],
+        "summary": "Create product",
+        "operationId": "createProduct",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateProductRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Product created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/{orgId}/plans": {
+      "get": {
+        "tags": ["Plans"],
+        "summary": "List pricing plans",
+        "operationId": "listPlans",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" },
+          { "name": "productId", "in": "query", "schema": { "type": "string" }, "description": "Filter by product ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of plans",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedPlans" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Plans"],
+        "summary": "Create pricing plan",
+        "operationId": "createPlan",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatePlanRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Plan created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Plan" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/{orgId}/customers": {
+      "get": {
+        "tags": ["Customers"],
+        "summary": "List customers",
+        "operationId": "listCustomers",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of customers",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedCustomers" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "summary": "Create customer",
+        "operationId": "createCustomer",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCustomerRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Customer created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/{orgId}/subscriptions": {
+      "post": {
+        "tags": ["Subscriptions"],
+        "summary": "Create subscription",
+        "description": "Creates a subscription for a customer on a pricing plan. Status is determined by plan type (FREE_TRIAL, ACTIVE).",
+        "operationId": "createSubscription",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateSubscriptionRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscription created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/apiv1/{orgId}/subscriptions/{subscriptionId}": {
+      "put": {
+        "tags": ["Subscriptions"],
+        "summary": "Upgrade or downgrade subscription",
+        "description": "Changes the plan for an existing subscription. Uses optimistic locking via updatedAt field.",
+        "operationId": "updateSubscription",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "subscriptionId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateSubscriptionRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscription updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      },
+      "delete": {
+        "tags": ["Subscriptions"],
+        "summary": "Cancel subscription",
+        "operationId": "cancelSubscription",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "subscriptionId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CancelSubscriptionRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Subscription cancelled" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/apiv1/{orgId}/invitations": {
+      "post": {
+        "tags": ["Invitations"],
+        "summary": "Create invitation",
+        "description": "Sends a team invitation email via SES with a 7-day expiry.",
+        "operationId": "createInvitation",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateInvitationRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Invitation created and email sent",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invitation" } } }
+          }
+        }
+      }
+    },
+    "/apiv1/{orgId}/api-keys": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "List API keys",
+        "operationId": "listApiKeys",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" }
+        ],
+        "responses": {
+          "200": { "description": "List of API keys" }
+        }
+      },
+      "post": {
+        "tags": ["API Keys"],
+        "summary": "Create API key",
+        "description": "Creates a new API key with auto-generated bk_ prefixed value.",
+        "operationId": "createApiKey",
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateApiKeyRequest" } } }
+        },
+        "responses": {
+          "201": { "description": "API key created" }
+        }
+      }
+    },
+    "/apiv1/public/accept-invitation": {
+      "post": {
+        "tags": ["Public"],
+        "summary": "Accept team invitation",
+        "description": "Public endpoint. Validates invitation code, creates Cognito user, and adds team member.",
+        "operationId": "acceptInvitation",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptInvitationRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Invitation accepted" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/apiv1/public/{orgId}/products": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "List active products (public)",
+        "operationId": "listPublicProducts",
+        "security": [ { "ApiKeyAuth": [] } ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of active products",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedProducts" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/apiv1/public/{orgId}/plans": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "List active plans (public)",
+        "operationId": "listPublicPlans",
+        "security": [ { "ApiKeyAuth": [] } ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" },
+          { "name": "productId", "in": "query", "schema": { "type": "string" }, "description": "Filter by product ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of active plans",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedPlans" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/apiv1/public/{orgId}/plans/{planId}": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "Get plan details (public)",
+        "operationId": "getPublicPlan",
+        "security": [ { "ApiKeyAuth": [] } ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "planId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan details",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Plan" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/apiv1/public/{orgId}/subscribe": {
+      "post": {
+        "tags": ["Public"],
+        "summary": "Subscribe customer (public)",
+        "description": "Creates or finds a customer by email and creates a subscription. Validated by x-api-key.",
+        "operationId": "publicSubscribe",
+        "security": [ { "ApiKeyAuth": [] } ],
+        "parameters": [ { "$ref": "#/components/parameters/OrgId" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicSubscribeRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscription created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PublicSubscribeResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Cognito access token"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Organization API key (bk_ prefix)"
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" },
+        "description": "Organization ID"
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+        "description": "Number of items per page"
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "schema": { "type": "string" },
+        "description": "Opaque pagination cursor from previous response"
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Resource not found",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "Conflict": {
+        "description": "Conflict (already exists, optimistic lock, or invalid state)",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "Unauthorized": {
+        "description": "Invalid or missing authentication",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "RateLimited": {
+        "description": "Too many requests",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds to wait before retrying" }
+        },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "timestamp"],
+            "properties": {
+              "code": { "type": "string", "example": "RESOURCE_NOT_FOUND" },
+              "message": { "type": "string", "example": "Customer not found" },
+              "target": { "type": "string", "example": "customerId" },
+              "requestId": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "hasMore": { "type": "boolean" },
+          "nextCursor": { "type": "string" }
+        }
+      },
+      "CreateOrganizationRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "example": "Acme Corp" },
+          "description": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "userEmail": { "type": "string", "format": "email" },
+          "userFirstName": { "type": "string" },
+          "userLastName": { "type": "string" },
+          "address": { "type": "string" },
+          "orgDomainUrls": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "CreateOrganizationResponse": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "accessRoleId": { "type": "string", "format": "uuid" },
+          "userId": { "type": "string" },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "accessRoleId": { "type": "string", "format": "uuid" },
+                "name": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "ListOrganizationsResponse": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } }
+        }
+      },
+      "Organization": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "productId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "ARCHIVED"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string" }
+        }
+      },
+      "CreateProductRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"], "default": "ACTIVE" }
+        }
+      },
+      "PaginatedProducts": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "planId": { "type": "string", "format": "uuid" },
+          "productId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "price": { "type": "number" },
+          "currency": { "type": "string", "example": "USD" },
+          "billingInterval": { "type": "string", "enum": ["MONTHLY", "YEARLY", "ONE_TIME", "TRIAL"] },
+          "trialDays": { "type": "integer" },
+          "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "ARCHIVED"] },
+          "features": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreatePlanRequest": {
+        "type": "object",
+        "required": ["productId", "name", "price", "currency", "billingInterval"],
+        "properties": {
+          "productId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "price": { "type": "number", "minimum": 0 },
+          "currency": { "type": "string", "example": "USD" },
+          "billingInterval": { "type": "string", "enum": ["MONTHLY", "YEARLY", "ONE_TIME", "TRIAL"] },
+          "trialDays": { "type": "integer", "minimum": 1 },
+          "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"], "default": "ACTIVE" },
+          "features": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "PaginatedPlans": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Plan" } },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "customerId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone": { "type": "string" },
+          "company": { "type": "string" },
+          "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateCustomerRequest": {
+        "type": "object",
+        "required": ["name", "email"],
+        "properties": {
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone": { "type": "string" },
+          "company": { "type": "string" }
+        }
+      },
+      "PaginatedCustomers": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "properties": {
+          "orgId": { "type": "string", "format": "uuid" },
+          "subscriptionId": { "type": "string", "format": "uuid" },
+          "customerId": { "type": "string", "format": "uuid" },
+          "productId": { "type": "string", "format": "uuid" },
+          "planId": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["FREE_TRIAL", "ACTIVE", "CANCELLED"] },
+          "billingInterval": { "type": "string", "enum": ["MONTHLY", "YEARLY", "ONE_TIME", "TRIAL"] },
+          "price": { "type": "number" },
+          "currency": { "type": "string" },
+          "currentPeriodStart": { "type": "string", "format": "date-time" },
+          "currentPeriodEnd": { "type": "string", "format": "date-time" },
+          "trialStart": { "type": "string", "format": "date-time" },
+          "trialEnd": { "type": "string", "format": "date-time" },
+          "autoRenew": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "number" }
+        }
+      },
+      "CreateSubscriptionRequest": {
+        "type": "object",
+        "required": ["customerId", "planId"],
+        "properties": {
+          "customerId": { "type": "string", "format": "uuid" },
+          "planId": { "type": "string", "format": "uuid" },
+          "autoRenew": { "type": "boolean", "default": true },
+          "metadata": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "UpdateSubscriptionRequest": {
+        "type": "object",
+        "required": ["planId"],
+        "properties": {
+          "planId": { "type": "string", "format": "uuid", "description": "New plan to switch to" },
+          "updatedAt": { "type": "number", "description": "Current updatedAt value for optimistic locking" }
+        }
+      },
+      "CancelSubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "immediate": { "type": "boolean", "default": true, "description": "Cancel immediately or at end of period" },
+          "cancelReason": { "type": "string" }
+        }
+      },
+      "CreateInvitationRequest": {
+        "type": "object",
+        "required": ["email", "roleId"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "roleId": { "type": "string", "format": "uuid" },
+          "orgName": { "type": "string" },
+          "inviterName": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "Invitation": {
+        "type": "object",
+        "properties": {
+          "invitationId": { "type": "string", "format": "uuid" },
+          "orgId": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "roleId": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["PENDING", "ACCEPTED", "EXPIRED", "REVOKED"] },
+          "invitedBy": { "type": "string" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "emailSent": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AcceptInvitationRequest": {
+        "type": "object",
+        "required": ["invitationCode", "orgId", "email", "password", "firstName", "lastName"],
+        "properties": {
+          "invitationCode": { "type": "string", "format": "uuid" },
+          "orgId": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "firstName": { "type": "string" },
+          "lastName": { "type": "string" }
+        }
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "Human-readable name for the API key" }
+        }
+      },
+      "PublicSubscribeRequest": {
+        "type": "object",
+        "required": ["email", "planId"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "planId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "company": { "type": "string" },
+          "phone": { "type": "string" }
+        }
+      },
+      "PublicSubscribeResponse": {
+        "type": "object",
+        "properties": {
+          "customerId": { "type": "string", "format": "uuid" },
+          "subscriptionId": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["FREE_TRIAL", "ACTIVE"] },
+          "planName": { "type": "string" },
+          "trialEnd": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

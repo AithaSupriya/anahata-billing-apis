@@ -12,22 +12,20 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { randomUUID } from 'crypto';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
+import { ErrorCodes } from './common/error-codes.js';
+import {
+  successResponse,
+  badRequest,
+  methodNotAllowed,
+  corsResponse,
+  internalError,
+} from './common/api-response.js';
+
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ses = new SESClient({});
 const INVITATIONS_TABLE = process.env.INVITATIONS_TABLE_NAME || 'BillingInvitations';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@anahata.ai';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://billing.sandbox.anahata.ai';
-
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-function respond(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return { statusCode, headers: CORS_HEADERS, body: JSON.stringify(body) };
-}
 
 async function sendInvitationEmail(
   toEmail: string,
@@ -75,7 +73,6 @@ async function sendInvitationEmail(
     console.log(`[INVITATION] Email sent to ${toEmail}`);
     return true;
   } catch (err: any) {
-    // SES might not be configured or email not verified — log but don't fail
     console.warn(`[INVITATION] Email sending failed (non-blocking): ${err.message}`);
     return false;
   }
@@ -89,43 +86,42 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }));
 
   try {
-    if (event.httpMethod === 'OPTIONS') return respond(200, {});
+    if (event.httpMethod === 'OPTIONS') return corsResponse();
 
     if (event.httpMethod !== 'POST') {
-      return respond(405, { error: 'Method not allowed' });
+      return methodNotAllowed();
     }
 
     const orgId = event.pathParameters?.orgId;
     if (!orgId) {
-      return respond(400, { error: 'orgId is required' });
+      return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'orgId is required', 'orgId');
     }
 
     let body: any;
     try {
       body = JSON.parse(event.body || '{}');
     } catch {
-      return respond(400, { error: 'Invalid JSON in request body' });
+      return badRequest(ErrorCodes.INVALID_JSON, 'Invalid JSON in request body');
     }
 
     // Validate required fields
     const { email, roleId, message } = body;
 
     if (!email || typeof email !== 'string') {
-      return respond(400, { error: 'email is required' });
+      return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'email is required', 'email');
     }
 
-    // Basic email validation
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return respond(400, { error: 'Invalid email format' });
+      return badRequest(ErrorCodes.INVALID_EMAIL, 'Invalid email format', 'email');
     }
 
     if (!roleId || typeof roleId !== 'string') {
-      return respond(400, { error: 'roleId is required' });
+      return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'roleId is required', 'roleId');
     }
 
     const now = new Date();
     const invitationId = randomUUID();
-    const invitationCode = randomUUID(); // Separate code for the email link
+    const invitationCode = randomUUID();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
     const invitedBy = event.requestContext?.authorizer?.userId || 'system';
@@ -152,7 +148,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     console.log(`[INVITATION] Created: invitationId=${invitationId} email=${email} orgId=${orgId}`);
 
-    // Send invitation email (non-blocking — if SES fails, invitation is still created)
+    // Send invitation email (non-blocking)
     const emailSent = await sendInvitationEmail(
       email.trim().toLowerCase(),
       invitationId,
@@ -161,7 +157,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       body.inviterName || '',
     );
 
-    return respond(201, {
+    return successResponse(201, {
       invitationId,
       orgId,
       email: item.email,
@@ -175,6 +171,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
   } catch (error: any) {
     console.error('[INVITATION] Error:', error);
-    return respond(500, { error: error.message || 'Internal server error' });
+    return internalError(event.requestContext?.requestId);
   }
 };

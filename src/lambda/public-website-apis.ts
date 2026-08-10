@@ -15,6 +15,18 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@a
 import { randomUUID } from 'crypto';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
+import { ErrorCodes } from './common/error-codes.js';
+import {
+  successResponse,
+  errorResponse,
+  badRequest,
+  notFound,
+  unauthorized,
+  corsResponse,
+  internalError,
+} from './common/api-response.js';
+import { parsePaginationParams, buildPaginatedResponse } from './common/pagination.js';
+
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE_NAME || 'AnahataBillingProducts';
@@ -22,17 +34,6 @@ const PLANS_TABLE = process.env.PLANS_TABLE_NAME || 'AnahataBillingPricingPlans'
 const CUSTOMERS_TABLE = process.env.CUSTOMERS_TABLE_NAME || 'AnahataBillingCustomers';
 const SUBSCRIPTIONS_TABLE = process.env.SUBSCRIPTIONS_TABLE_NAME || 'AnahataBillingSubscriptions';
 const API_KEYS_TABLE = process.env.API_KEYS_TABLE_NAME || 'AnahataBillingApiKeys';
-
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
-};
-
-function respond(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return { statusCode, headers: CORS_HEADERS, body: JSON.stringify(body) };
-}
 
 function log(level: string, message: string, data?: Record<string, unknown>) {
   const entry = { level, message, timestamp: new Date().toISOString(), ...data };
@@ -85,8 +86,10 @@ async function validateApiKey(apiKey: string, orgId: string): Promise<boolean> {
 }
 
 // ── LIST PUBLIC PRODUCTS ──
-async function listPublicProducts(orgId: string): Promise<APIGatewayProxyResult> {
+async function listPublicProducts(orgId: string, event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   log('info', 'Listing public products', { orgId });
+
+  const { limit, cursor } = parsePaginationParams(event);
 
   const result = await ddb.send(new QueryCommand({
     TableName: PRODUCTS_TABLE,
@@ -94,15 +97,19 @@ async function listPublicProducts(orgId: string): Promise<APIGatewayProxyResult>
     FilterExpression: '#status = :active',
     ExpressionAttributeNames: { '#status': 'status' },
     ExpressionAttributeValues: { ':orgId': orgId, ':active': 'ACTIVE' },
+    Limit: limit,
+    ...(cursor && { ExclusiveStartKey: cursor }),
   }));
 
   const items = result.Items || [];
-  return respond(200, { items, count: items.length });
+  return successResponse(200, buildPaginatedResponse(items, limit, result.LastEvaluatedKey));
 }
 
 // ── LIST PUBLIC PLANS ──
-async function listPublicPlans(orgId: string, productId?: string): Promise<APIGatewayProxyResult> {
+async function listPublicPlans(orgId: string, productId: string | undefined, event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   log('info', 'Listing public plans', { orgId, productId });
+
+  const { limit, cursor } = parsePaginationParams(event);
 
   let filterExpression = '#status = :active';
   const expressionValues: Record<string, unknown> = { ':orgId': orgId, ':active': 'ACTIVE' };
@@ -119,10 +126,12 @@ async function listPublicPlans(orgId: string, productId?: string): Promise<APIGa
     FilterExpression: filterExpression,
     ExpressionAttributeNames: expressionNames,
     ExpressionAttributeValues: expressionValues,
+    Limit: limit,
+    ...(cursor && { ExclusiveStartKey: cursor }),
   }));
 
   const items = result.Items || [];
-  return respond(200, { items, count: items.length });
+  return successResponse(200, buildPaginatedResponse(items, limit, result.LastEvaluatedKey));
 }
 
 // ── GET PUBLIC PLAN ──
@@ -134,15 +143,11 @@ async function getPublicPlan(orgId: string, planId: string): Promise<APIGatewayP
     Key: { orgId, planId },
   }));
 
-  if (!result.Item) {
-    return respond(404, { error: 'Plan not found' });
+  if (!result.Item || result.Item.status !== 'ACTIVE') {
+    return notFound(ErrorCodes.PLAN_NOT_FOUND, 'Plan not found', 'planId');
   }
 
-  if (result.Item.status !== 'ACTIVE') {
-    return respond(404, { error: 'Plan not found' });
-  }
-
-  return respond(200, result.Item);
+  return successResponse(200, result.Item);
 }
 
 // ── PUBLIC SUBSCRIBE ──
@@ -152,7 +157,12 @@ async function publicSubscribe(orgId: string, body: Record<string, unknown>): Pr
   };
 
   if (!email || !planId) {
-    return respond(400, { error: 'email and planId are required' });
+    return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'email and planId are required', 'email,planId');
+  }
+
+  // Basic email validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return badRequest(ErrorCodes.INVALID_EMAIL, 'Invalid email format', 'email');
   }
 
   log('info', 'Public subscribe request', { orgId, email, planId });
@@ -163,7 +173,7 @@ async function publicSubscribe(orgId: string, body: Record<string, unknown>): Pr
     Key: { orgId, planId },
   }));
   if (!planResult.Item || planResult.Item.status !== 'ACTIVE') {
-    return respond(404, { error: 'Plan not found or not active' });
+    return notFound(ErrorCodes.PLAN_NOT_FOUND, 'Plan not found or not active', 'planId');
   }
   const plan = planResult.Item;
 
@@ -180,7 +190,7 @@ async function publicSubscribe(orgId: string, body: Record<string, unknown>): Pr
     }));
     if (customerQuery.Items && customerQuery.Items.length > 0) {
       customer = customerQuery.Items[0];
-      log('info', 'Found existing customer', { customerId: customer.customerId });
+      log('info', 'Found existing customer', { customerId: customer!.customerId });
     }
   } catch {
     // If GSI doesn't exist, scan with filter (less efficient but works)
@@ -268,7 +278,7 @@ async function publicSubscribe(orgId: string, body: Record<string, unknown>): Pr
   await ddb.send(new PutCommand({ TableName: SUBSCRIPTIONS_TABLE, Item: subscription }));
   log('info', 'Created subscription', { subscriptionId, status });
 
-  return respond(201, {
+  return successResponse(201, {
     customerId: customer.customerId,
     subscriptionId,
     status,
@@ -288,19 +298,19 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   try {
     // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
-      return respond(200, {});
+      return corsResponse();
     }
 
     const orgId = event.pathParameters?.orgId;
     if (!orgId) {
-      return respond(400, { error: 'orgId is required' });
+      return badRequest(ErrorCodes.MISSING_REQUIRED_FIELD, 'orgId is required', 'orgId');
     }
 
     // Validate API key
     const apiKey = event.headers?.['x-api-key'] || event.headers?.['X-Api-Key'] || '';
     const isValid = await validateApiKey(apiKey, orgId);
     if (!isValid) {
-      return respond(401, { error: 'Invalid or missing API key' });
+      return unauthorized(ErrorCodes.INVALID_API_KEY, 'Invalid or missing API key');
     }
 
     const method = event.httpMethod;
@@ -308,7 +318,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // Route: GET /public/{orgId}/products
     if (method === 'GET' && path.includes('/products')) {
-      return await listPublicProducts(orgId);
+      return await listPublicProducts(orgId, event);
     }
 
     // Route: GET /public/{orgId}/plans/{planId}
@@ -320,7 +330,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // Route: GET /public/{orgId}/plans
     if (method === 'GET' && path.includes('/plans')) {
       const productId = event.queryStringParameters?.productId;
-      return await listPublicPlans(orgId, productId);
+      return await listPublicPlans(orgId, productId, event);
     }
 
     // Route: POST /public/{orgId}/subscribe
@@ -329,10 +339,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await publicSubscribe(orgId, body);
     }
 
-    return respond(404, { error: 'Not found' });
+    return notFound(ErrorCodes.RESOURCE_NOT_FOUND, 'Not found');
   } catch (error: unknown) {
     const err = error as Error;
     log('error', 'Unhandled error in public website API', { error: err.message, stack: err.stack });
-    return respond(500, { error: 'Internal server error' });
+    return internalError();
   }
 };
